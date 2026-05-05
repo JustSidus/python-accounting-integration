@@ -1,76 +1,89 @@
 # API de Sincronización Contable
 
-Desarrollado en Django 6.0.3 con API REST.
+API REST desarrollada en Django orientada a la sincronización robusta y segura de datos financieros entre sistemas.
 
-## Instalación y Setup
+Este proyecto va más allá de un simple CRUD. Diseñé un **mecanismo de sincronización** que asegura la trazabilidad local de los asientos contables mediante un sistema de estados (`Pendiente`, `Enviado`, `Error`). Esto garantiza la integridad de los datos, previene la pérdida de transacciones y permite un *fallback* automático y reintentos seguros si el host remoto experimenta caídas o cambios de puerto.
+
+## Arquitectura e Infraestructura
+
+El sistema está diseñado pensando en escalabilidad y alta disponibilidad. A continuación se detalla el flujo de datos y la infraestructura:
+
+```mermaid
+graph TD
+    Client([Cliente / Aplicación]) -->|HTTPS| CF[Cloudflare<br>DNS & WAF]
+    CF -->|Tráfico Seguro| GCR[Google Cloud Run<br>Contenedor Docker]
+    
+    subgraph Backend [Arquitectura Serverless]
+        GCR
+    end
+    
+    GCR <-->|ORM / Consultas| DB[(PostgreSQL<br>Azure / Cloud SQL)]
+    GCR -.->|Sincroniza Asientos<br>con Fallback Automático| WS[Web Service Contable<br>:3000 / :8080]
+```
+
+- **Despliegue y Orquestación:** Contenedorizado con **Docker** y preparado para operar sin servidor (Serverless) en **Google Cloud Run**.
+- **Base de Datos:** Integración robusta con **PostgreSQL** (preparado para entornos gestionados como Azure Database o Cloud SQL).
+- **Red y Seguridad:** Arquitectura pensada para operar detrás de **Cloudflare** para la gestión ágil de DNS, terminación SSL estricta y mitigación de ataques DDoS.
+
+---
+
+## Integración con el Web Service Contable
+
+El sistema despacha automáticamente los asientos hacia el WS contable cuando una orden de trabajo o compra pasa a estado `Completada`.
+
+**Resiliencia y Trazabilidad Local:**
+Para evitar discrepancias en auditorías, cada asiento guarda localmente:
+- Estado de envío (`Pendiente`, `Enviado`, `Error`).
+- ID remoto asignado por el sistema contable.
+- Fecha exacta de sincronización.
+- Logs o mensajes de error (permite detectar y corregir errores de mapeo sin perder el asiento local).
+
+Si el host cambia de puerto y no se define uno explícito (`WS_CONTABLE_BASE_URL`), la integración intenta un *fallback* automático a los puertos habituales (`:3000` y `:8080`).
+
+---
+
+## Entorno de Desarrollo Local
+
+### 1. Requisitos y Setup Inicial
 
 ```bash
-# 1. Clonar el repositorio
+# Clonar el repositorio
 git clone https://github.com/JustSidus/python-accounting-integration.git
 cd python-accounting-integration
 
-# 2. Crear y activar el entorno virtual
+# Crear y activar el entorno virtual
 python -m venv venv
-# Windows:
+
+# En Windows:
 venv\Scripts\activate
-# Mac/Linux:
+# En Mac/Linux:
 source venv/bin/activate
 
-# 3. Instalar dependencias
+# Instalar dependencias
 python -m pip install -r requirements.txt
+```
 
-# 4. Configurar el entorno
-# Copiar el archivo de ejemplo de variables de entorno
+### 2. Configuración y Ejecución
+
+```bash
+# Copiar variables de entorno (Windows: Copy-Item .env.example .env)
 cp .env.example .env
-# En Windows PowerShell:
-# Copy-Item .env.example .env
 
-# 5. Aplicar migraciones
+# Aplicar migraciones a la base de datos
 python manage.py migrate
 
-# 6. Crear superusuario (para acceder al admin)
+# Crear usuario administrador
 python manage.py createsuperuser
 
-# 7. Correr el servidor LOCAL
+# Levantar el servidor local
 python manage.py runserver
 ```
 
-> Nota: por defecto este proyecto usa `127.0.0.1:8010` para no chocar con otras apps locales.
-> Puedes cambiarlo con `DJANGO_RUNSERVER_ADDRPORT` en `.env` o pasando el puerto en el comando.
+> **Nota de red:** Por defecto, este proyecto utiliza el puerto `8010` (`127.0.0.1:8010`) para evitar conflictos con otras aplicaciones locales. Se puede modificar ajustando `DJANGO_RUNSERVER_ADDRPORT` en el archivo `.env`.
 
-## Acceder al sistema
+### Endpoints Principales
 
-- **Sistema principal:** http://127.0.0.1:8010/
-- **Login web:** http://127.0.0.1:8010/login/
-- **Admin Django:** http://127.0.0.1:8010/admin/
-- **API Asientos Contables:** http://127.0.0.1:8010/api/asientos/
-- **Login API (Browsable API):** http://127.0.0.1:8010/api-auth/login/
-
-## Integracion con WS Contable
-
-La app puede enviar automaticamente los asientos al WS contable cuando una orden cambia a estado `Completada`.
-
-### Campos enviados (minimos necesarios)
-
-- `descripcion`
-- `auxiliar.id`
-- `fechaAsiento`
-- `montoTotal`
-- `detalles` (2 lineas: Debito y Credito)
-- `estado`
-
-### Configuracion recomendada del WS
-
-- `WS_CONTABLE_BASE_URL=http://151.242.194.24:3000`
-- Si el host cambia de puerto y no defines uno explícito, la integración intentará fallback automático a `:3000` y `:8080`.
-
-### Trazabilidad local
-
-Cada `AsientoContable` guarda:
-
-- estado de envio (`Pendiente`, `Enviado`, `Error`)
-- id remoto del asiento
-- fecha de envio
-- mensaje de error
-
-Esto permite detectar y corregir incompatibilidades de mapeo sin perder el asiento local.
+- **Sistema principal:** `http://127.0.0.1:8010/`
+- **Dashboard Admin:** `http://127.0.0.1:8010/admin/`
+- **API REST (Asientos):** `http://127.0.0.1:8010/api/asientos/`
+- **Autenticación API:** `http://127.0.0.1:8010/api-auth/login/`
