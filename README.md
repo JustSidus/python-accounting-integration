@@ -1,13 +1,13 @@
-# Sistema de Compras - UNAPEC
+# API de Sincronización Contable
 
-Proyecto final de asignatura Compras e interfaz con Contabilidad. Desarrollado en Django 6.0.3 con API REST.
+Desarrollado en Django 6.0.3 con API REST.
 
 ## Instalación y Setup
 
 ```bash
 # 1. Clonar el repositorio
-git clone https://github.com/JustSidus/Proyecto-Final-ISO815.git
-cd Proyecto-Final-ISO815
+git clone https://github.com/JustSidus/python-accounting-integration.git
+cd python-accounting-integration
 
 # 2. Crear y activar el entorno virtual
 python -m venv venv
@@ -74,10 +74,3 @@ Cada `AsientoContable` guarda:
 - mensaje de error
 
 Esto permite detectar y corregir incompatibilidades de mapeo sin perder el asiento local.
-
-## Equipo
-
-- **Profesor:** Juan P. Valdez
-- **Asignatura:** ISO815
-- **Institución:** Universidad Apec
-- **Año:** 2026
