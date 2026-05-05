@@ -1,89 +1,69 @@
 # API de Sincronización Contable
 
-API REST desarrollada en Django orientada a la sincronización robusta y segura de datos financieros entre sistemas.
+Este proyecto implementa una solución robusta para la integración y sincronización de datos de compras hacia sistemas contables. En lugar de funcionar como una simple pasarela de datos, el sistema actúa como un intermediario transaccional que garantiza la integridad, resiliencia y el seguimiento de las operaciones financieras.
 
-Este proyecto va más allá de un simple CRUD. Diseñé un **mecanismo de sincronización** que asegura la trazabilidad local de los asientos contables mediante un sistema de estados (`Pendiente`, `Enviado`, `Error`). Esto garantiza la integridad de los datos, previene la pérdida de transacciones y permite un *fallback* automático y reintentos seguros si el host remoto experimenta caídas o cambios de puerto.
+## Propuesta de Valor y Solución
 
-## Arquitectura e Infraestructura
+El núcleo del sistema es un mecanismo de sincronización diseñado para operar en entornos donde la disponibilidad del host destino puede variar. Las decisiones de arquitectura están enfocadas en la confiabilidad:
 
-El sistema está diseñado pensando en escalabilidad y alta disponibilidad. A continuación se detalla el flujo de datos y la infraestructura:
+* **Trazabilidad Absoluta:** Asegura el seguimiento local de cada asiento contable mediante una estricta máquina de estados (`Pendiente`, `Enviado`, `Error`). Esto garantiza auditorías precisas sobre qué información ha sido procesada.
+* **Resiliencia y Fallback Automático:** En escenarios de inestabilidad de red o si el host contable cambia de puerto dinámicamente, el sistema cuenta con un mecanismo de *fallback* diseñado para interceptar el fallo, reconfigurar el destino y reintentar la conexión, evitando la pérdida o duplicación de datos financieros.
+* **Procesamiento Eficiente:** Transformación y consolidación de comprobantes y archivos XML (`lxml`) utilizando `pandas` y `numpy` para optimizar el rendimiento de la carga en memoria antes de la persistencia transaccional.
+
+## Arquitectura del Sistema
+
+Arquitectura de la aplicación detallando la ingesta, procesamiento, almacenamiento y telemetría.
 
 ```mermaid
 graph TD
-    Client([Cliente / Aplicación]) -->|HTTPS| CF[Cloudflare<br>DNS & WAF]
-    CF -->|Tráfico Seguro| GCR[Google Cloud Run<br>Contenedor Docker]
+    Client[Sistemas / Clientes] -->|HTTP / Datos| Django[API REST - Django]
+    Django --> Transform[Capa de Datos - Pandas/NumPy]
+    Transform --> DB[(Microsoft SQL Server)]
     
-    subgraph Backend [Arquitectura Serverless]
-        GCR
-    end
+    Django --> Sync[Módulo de Sincronización]
+    Sync -->|Envío Transaccional| Host[Host Contable Destino]
+    Sync -.->|Mecanismo de Fallback| Host
     
-    GCR <-->|ORM / Consultas| DB[(PostgreSQL<br>Azure / Cloud SQL)]
-    GCR -.->|Sincroniza Asientos<br>con Fallback Automático| WS[Web Service Contable<br>:3000 / :8080]
+    %% Observabilidad
+    Django -.->|Telemetría y Contexto| Azure[Azure Application Insights]
+    
+    classDef database fill:#f9f6f6,stroke:#333,stroke-width:2px;
+    class DB database;
 ```
 
-- **Despliegue y Orquestación:** Contenedorizado con **Docker** y preparado para operar sin servidor (Serverless) en **Google Cloud Run**.
-- **Base de Datos:** Integración robusta con **PostgreSQL** (preparado para entornos gestionados como Azure Database o Cloud SQL).
-- **Red y Seguridad:** Arquitectura pensada para operar detrás de **Cloudflare** para la gestión ágil de DNS, terminación SSL estricta y mitigación de ataques DDoS.
+## Stack Tecnológico
 
----
+El proyecto está construido sobre un stack enfocado en procesamiento de datos y despliegue empresarial:
 
-## Integración con el Web Service Contable
+* **Core Web/API:** Python 3, Django 6.x, Django REST Framework.
+* **Procesamiento y ETL:** Pandas, NumPy, lxml.
+* **Persistencia:** Microsoft SQL Server (integración vía `mssql-django` y `pyodbc`).
+* **Observabilidad:** Telemetría distribuida con Azure (`opencensus`, `opencensus-ext-azure`).
+* **Infraestructura:** Gunicorn con `gthread` workers, servido de estáticos optimizado con Whitenoise.
 
-El sistema despacha automáticamente los asientos hacia el WS contable cuando una orden de trabajo o compra pasa a estado `Completada`.
+## Configuración y Despliegue
 
-**Resiliencia y Trazabilidad Local:**
-Para evitar discrepancias en auditorías, cada asiento guarda localmente:
-- Estado de envío (`Pendiente`, `Enviado`, `Error`).
-- ID remoto asignado por el sistema contable.
-- Fecha exacta de sincronización.
-- Logs o mensajes de error (permite detectar y corregir errores de mapeo sin perder el asiento local).
+La aplicación está diseñada para despliegues inmutables en plataformas PaaS (como Azure App Service) y utiliza un archivo `Procfile` para definir la inicialización del contenedor.
 
-Si el host cambia de puerto y no se define uno explícito (`WS_CONTABLE_BASE_URL`), la integración intenta un *fallback* automático a los puertos habituales (`:3000` y `:8080`).
+### Desarrollo Local
 
----
+1. Crear y activar el entorno virtual:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # En Windows: venv\Scripts\activate
+   ```
+2. Instalar las dependencias exactas:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Configurar variables de entorno basándose en `.env.example` (incluyendo cadenas de conexión a MS SQL y claves de telemetría de Azure).
 
-## Entorno de Desarrollo Local
+### Ejecución en Producción
 
-### 1. Requisitos y Setup Inicial
+El ciclo de arranque definido para el servidor de producción garantiza que las migraciones se apliquen antes de levantar la aplicación WSGI:
 
 ```bash
-# Clonar el repositorio
-git clone https://github.com/JustSidus/python-accounting-integration.git
-cd python-accounting-integration
-
-# Crear y activar el entorno virtual
-python -m venv venv
-
-# En Windows:
-venv\Scripts\activate
-# En Mac/Linux:
-source venv/bin/activate
-
-# Instalar dependencias
-python -m pip install -r requirements.txt
+python manage.py migrate --noinput
+python manage.py collectstatic --noinput
+gunicorn config.wsgi --workers 2 --threads 2 --worker-class gthread --bind 0.0.0.0:8000 --timeout 60
 ```
-
-### 2. Configuración y Ejecución
-
-```bash
-# Copiar variables de entorno (Windows: Copy-Item .env.example .env)
-cp .env.example .env
-
-# Aplicar migraciones a la base de datos
-python manage.py migrate
-
-# Crear usuario administrador
-python manage.py createsuperuser
-
-# Levantar el servidor local
-python manage.py runserver
-```
-
-> **Nota de red:** Por defecto, este proyecto utiliza el puerto `8010` (`127.0.0.1:8010`) para evitar conflictos con otras aplicaciones locales. Se puede modificar ajustando `DJANGO_RUNSERVER_ADDRPORT` en el archivo `.env`.
-
-### Endpoints Principales
-
-- **Sistema principal:** `http://127.0.0.1:8010/`
-- **Dashboard Admin:** `http://127.0.0.1:8010/admin/`
-- **API REST (Asientos):** `http://127.0.0.1:8010/api/asientos/`
-- **Autenticación API:** `http://127.0.0.1:8010/api-auth/login/`
